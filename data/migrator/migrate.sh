@@ -24,8 +24,6 @@ fi
 
 for file in "${files[@]}"; do
     filename=$(basename "$file")
-    # psql variable interpolation (' :'var'') only applies to stdin/-f
-    # input, NOT to -c strings — hence heredocs here.
     applied=$(psql "$DATABASE_URL" -tA -v filename="$filename" <<'SQL'
 SELECT 1 FROM migrator.schema_migrations WHERE filename = :'filename';
 SQL
