@@ -6,7 +6,6 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-
 _STRICT = ConfigDict(frozen=True, extra="forbid")
 
 

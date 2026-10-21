@@ -10,3 +10,19 @@ class OrchestratorError(Exception):
 
 class SafetyViolation(OrchestratorError):
     user_message = "the question could not be answered safely"
+
+
+class BadRequest(OrchestratorError):
+    user_message = "invalid request"
+
+
+class NoSafeQuery(OrchestratorError):
+    user_message = "the question could not be answered safely"
+
+
+class LLMFailure(OrchestratorError):
+    user_message = "the question could not be answered right now"
+
+
+class QueryFailed(OrchestratorError):
+    user_message = "the query could not be completed"
