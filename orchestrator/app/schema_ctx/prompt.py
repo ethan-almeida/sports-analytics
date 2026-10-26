@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
+
+from app.retrieval.corpus import CorpusEntry
 from app.schema_ctx.manifest import Manifest
 
 _SYSTEM_RULES = (
@@ -22,9 +25,21 @@ def build_schema_slice(manifest: Manifest) -> str:
     return "\n".join(lines)
 
 
-def build_messages(question: str, sport: str, manifest: Manifest) -> list[dict[str, str]]:
+def build_messages(
+    question: str,
+    sport: str,
+    manifest: Manifest,
+    exemplars: Sequence[CorpusEntry] = (),
+) -> list[dict[str, str]]:
     system = f"{_SYSTEM_RULES}\n\n{build_schema_slice(manifest)}"
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": f"sport: {sport}\nquestion: {question}"},
-    ]
+    messages: list[dict[str, str]] = [{"role": "system", "content": system}]
+    for exemplar in exemplars:
+        messages.append(
+            {
+                "role": "user",
+                "content": f"sport: {exemplar.sport}\nquestion: {exemplar.question}",
+            }
+        )
+        messages.append({"role": "assistant", "content": exemplar.sql})
+    messages.append({"role": "user", "content": f"sport: {sport}\nquestion: {question}"})
+    return messages
