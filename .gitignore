@@ -16,3 +16,4 @@ coverage.out
 .idea/
 .vscode/
 .DS_Store
+docs/plan.md
