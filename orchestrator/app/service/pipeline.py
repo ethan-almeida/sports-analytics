@@ -11,8 +11,10 @@ from app.cache.writer import CacheWriter
 from app.core.logging import get_logger
 from app.core.settings import Settings
 from app.db.pool import Database
-from app.errors import LLMFailure, NoSafeQuery, QueryFailed, SafetyViolation
+from app.errors import LLMFailure, NoSafeQuery, OrchestratorError, QueryFailed, SafetyViolation
 from app.llm.base import LLMClient
+from app.retrieval.corpus import CorpusEntry
+from app.retrieval.store import QuestionStore
 from app.safety.validation import validate_query
 from app.schema_ctx.manifest import Manifest
 from app.schema_ctx.prompt import build_messages
@@ -52,12 +54,14 @@ class Pipeline:
         llm: LLMClient,
         database: Database,
         cache: CacheWriter,
+        retriever: QuestionStore | None = None,
     ) -> None:
         self.settings = settings
         self.manifest = manifest
         self.llm = llm
         self.database = database
         self.cache = cache
+        self.retriever = retriever
 
     def run(
         self,
@@ -67,7 +71,12 @@ class Pipeline:
         cache_key: str | None = None,
     ) -> PipelineResult:
         started = time.perf_counter()
-        messages = build_messages(question, sport, self.manifest)
+        messages = build_messages(
+            question,
+            sport,
+            self.manifest,
+            self._retrieve_exemplars(question, sport),
+        )
         try:
             query = attempt_with_repair(
                 messages,
@@ -79,6 +88,8 @@ class Pipeline:
             raise
         except SafetyViolation as violation:
             raise NoSafeQuery(violation.detail) from violation
+        except OrchestratorError:
+            raise
         except Exception as exc:
             raise LLMFailure(f"llm call failed: {type(exc).__name__}: {exc}") from exc
 
@@ -101,6 +112,16 @@ class Pipeline:
             except Exception as exc:
                 logger.warning("cache write failed", extra={"detail": str(exc)})
         return PipelineResult(**payload)
+
+    def _retrieve_exemplars(self, question: str, sport: str) -> list[CorpusEntry]:
+        if self.retriever is None or self.settings.few_shot_k <= 0:
+            return []
+        try:
+            exemplars = self.retriever.similar(question, sport, self.settings.few_shot_k)
+        except Exception as exc:
+            logger.warning("few-shot retrieval failed", extra={"detail": str(exc)})
+            return []
+        return list(exemplars)
 
     def _guard(self, sql_text: str, max_rows: int) -> str:
         return cap_rows(validate_query(sql_text, self.manifest), max_rows)
