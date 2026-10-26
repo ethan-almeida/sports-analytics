@@ -33,5 +33,20 @@ services:
         condition: service_healthy
     restart: "no"
 
+  ingestor:
+    build: ./ingestor
+    command: ["serve"]
+    environment:
+      INGESTOR_DATABASE_URL: postgres://ingestor:${INGESTOR_DB_PASSWORD:-dev_ingestor}@postgres:5432/sports
+      INGESTOR_SOURCES_CONFIG: /app/configs/sources.yaml
+      INGESTOR_LOG_LEVEL: ${INGESTOR_LOG_LEVEL:-INFO}
+      INGESTOR_DAEMON_INTERVAL_SECONDS: ${INGESTOR_DAEMON_INTERVAL_SECONDS:-300}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    restart: "no"
+
 volumes:
   pgdata:

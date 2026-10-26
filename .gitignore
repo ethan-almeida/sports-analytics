@@ -1,12 +1,13 @@
 .env
 .env.*
-.env.example
+!.env.example
 .venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+data/chroma/
 ingestor/bin/
 gateway/bin/
 *.test
@@ -15,4 +16,3 @@ coverage.out
 .idea/
 .vscode/
 .DS_Store
-docker-compose.test.yml
