@@ -13,6 +13,8 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "psycopg-pool>=3.2",
     "uvicorn>=0.32",
+    "openai>=1.55",
+    "chromadb>=1.0",
 ]
 
 [project.optional-dependencies]

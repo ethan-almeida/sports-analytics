@@ -9,6 +9,7 @@ from app.db.pool import QueryResult
 from app.errors import LLMFailure, NoSafeQuery, QueryFailed
 from app.llm.base import LLMClient
 from app.llm.fake import FakeLLM
+from app.retrieval.corpus import CorpusEntry
 from app.schema_ctx.manifest import Manifest, load_manifest
 from app.service.pipeline import Pipeline
 
@@ -67,16 +68,25 @@ def make_pipeline(
     cache: RecordingCache | None = None,
     llm: LLMClient | None = None,
     max_repair_attempts: int = 2,
+    retriever=None,
 ) -> tuple[Pipeline, LLMClient, StubDatabase, RecordingCache]:
     settings = Settings(
         _env_file=None,
         max_repair_attempts=max_repair_attempts,
         cache_ttl_seconds=111,
+        few_shot_k=2 if retriever is not None else 0,
     )
     resolved_llm = llm or FakeLLM(responses)
     resolved_database = database or StubDatabase()
     resolved_cache = cache or RecordingCache()
-    pipeline = Pipeline(settings, manifest, resolved_llm, resolved_database, resolved_cache)
+    pipeline = Pipeline(
+        settings,
+        manifest,
+        resolved_llm,
+        resolved_database,
+        resolved_cache,
+        retriever,
+    )
     return pipeline, resolved_llm, resolved_database, resolved_cache
 
 
@@ -203,3 +213,68 @@ def test_missing_cache_key_skips_cache(manifest: Manifest) -> None:
     pipeline.run(question="list leagues", sport="basketball", max_rows=10)
 
     assert cache.puts == []
+
+
+class StubRetriever:
+    def __init__(
+        self,
+        entries: list[CorpusEntry] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.entries = entries or []
+        self.error = error
+        self.lookups: list[tuple[str, str, int]] = []
+
+    def similar(self, question: str, sport: str, k: int) -> list[CorpusEntry]:
+        if self.error is not None:
+            raise self.error
+        self.lookups.append((question, sport, k))
+        return self.entries
+
+
+EXEMPLARS = [
+    CorpusEntry(
+        sport="nba",
+        question="Who scored most points?",
+        sql="SELECT p.full_name FROM sports.players AS p",
+    ),
+]
+
+
+def test_few_shot_exemplars_reach_llm_messages(manifest: Manifest) -> None:
+    retriever = StubRetriever(EXEMPLARS)
+    pipeline, llm, _, _ = make_pipeline(
+        ["SELECT code FROM sports.leagues"], manifest=manifest, retriever=retriever
+    )
+
+    pipeline.run(question="top scorers", sport="nba", max_rows=10)
+
+    roles = [message["role"] for message in llm.calls[0]]
+    assert roles == ["system", "user", "assistant", "user"]
+    assert llm.calls[0][-1]["content"] == "sport: nba\nquestion: top scorers"
+    assert retriever.lookups == [("top scorers", "nba", 2)]
+
+
+def test_few_shot_zero_k_disables_lookups(manifest: Manifest) -> None:
+    retriever = StubRetriever(EXEMPLARS)
+    pipeline, llm, _, _ = make_pipeline(
+        ["SELECT code FROM sports.leagues"], manifest=manifest, retriever=retriever
+    )
+    pipeline.settings.few_shot_k = 0
+
+    pipeline.run(question="top scorers", sport="nba", max_rows=10)
+
+    assert retriever.lookups == []
+    assert len(llm.calls[0]) == 2
+
+
+def test_retriever_failure_degrades_to_no_exemplars(manifest: Manifest) -> None:
+    retriever = StubRetriever(error=RuntimeError("chroma exploded"))
+    pipeline, llm, _, _ = make_pipeline(
+        ["SELECT code FROM sports.leagues"], manifest=manifest, retriever=retriever
+    )
+
+    result = pipeline.run(question="top scorers", sport="nba", max_rows=10)
+
+    assert result.row_count == 1
+    assert len(llm.calls[0]) == 2

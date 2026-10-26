@@ -14,6 +14,7 @@ from app.db.pool import Database
 from app.errors import BadRequest, LLMFailure, NoSafeQuery, OrchestratorError, QueryFailed
 from app.llm import build_llm
 from app.llm.base import LLMClient
+from app.retrieval.store import QuestionStore, build_retriever
 from app.schema_ctx.manifest import Manifest, load_manifest
 from app.service.pipeline import Pipeline
 
@@ -41,9 +42,23 @@ def create_app(
     llm: LLMClient | None = None,
     database: Database | None = None,
     cache: CacheWriter | None = None,
+    retriever: QuestionStore | None = None,
 ) -> FastAPI:
     settings = settings or Settings()
     configure_logging(settings.log_level)
+    logger.warning(
+        "orchestrator config",
+        extra={
+            "provider": settings.llm_provider,
+            "model": settings.llm_model,
+            "few_shot_k": settings.few_shot_k,
+            "provider_warning": (
+                "running with the deterministic FakeLLM - SQL will NOT come from a real model"
+                if settings.llm_provider == "fake"
+                else None
+            ),
+        },
+    )
     loaded_manifest = manifest or load_manifest(settings.resolve_manifest_path())
     loaded_llm = llm or build_llm(settings)
     loaded_database = database or Database(
@@ -52,7 +67,15 @@ def create_app(
         settings.db_statement_timeout_ms,
     )
     loaded_cache = cache or build_cache_writer(settings)
-    pipeline = Pipeline(settings, loaded_manifest, loaded_llm, loaded_database, loaded_cache)
+    loaded_retriever = retriever if retriever is not None else build_retriever(settings)
+    pipeline = Pipeline(
+        settings,
+        loaded_manifest,
+        loaded_llm,
+        loaded_database,
+        loaded_cache,
+        loaded_retriever,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
